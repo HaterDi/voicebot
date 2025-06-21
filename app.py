@@ -7,7 +7,13 @@ from voicebot.voicebot import VoiceBot
 # -----------------------------------------------------------------------------
 # 1) Configuration: read credentials from environment variables
 # -----------------------------------------------------------------------------
-APP_ID = os.environ["MICROSOFT_APP_ID"]
+APP_ID = os.environ.get("MICROSOFT_APP_ID")
+if not APP_ID:
+    raise Exception("❌ Environment variable MICROSOFT_APP_ID not found")
+
+APP_PASSWORD = os.environ.get("MICROSOFT_APP_PASSWORD")
+if not APP_PASSWORD:
+    raise Exception("❌ Environment variable MICROSOFT_APP_PASSWORD not found")
 APP_PASSWORD = os.environ["MICROSOFT_APP_PASSWORD"]
 PORT = int(os.environ.get("PORT", 3978))
 
