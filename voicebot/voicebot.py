@@ -13,14 +13,14 @@ from botbuilder.dialogs.prompts import PromptOptions
 
 class VoiceBot:
     def __init__(self):
-        # Коннект к Azure SQL Database
+        # Connect to Azure SQL Database
         conn_str = os.environ.get("SQL_CONNECTION_STRING")
         self.db = pyodbc.connect(conn_str)
 
-        # Хранилище состояния диалога (в реальном приложении используйте ConversationState)
+        # Temporary in-memory state (replace with real ConversationState in production)
         self.dialog_state = {}
 
-        # Набор диалогов
+        # Setup dialogs
         self.dialogs = DialogSet(self.dialog_state)
         self.dialogs.add(TextPrompt("namePrompt"))
         self.dialogs.add(TextPrompt("emailPrompt"))
@@ -40,7 +40,7 @@ class VoiceBot:
         )
 
     async def on_turn(self, turn_context: TurnContext):
-        # 1) Proactive welcome при подключении
+        # Welcome new users
         if turn_context.activity.type == ActivityTypes.conversation_update:
             for member in turn_context.activity.members_added:
                 if member.id != turn_context.activity.recipient.id:
@@ -49,20 +49,22 @@ class VoiceBot:
                             "Hello! 👋\nI’m your voice registration bot.\nMay I know your name?"
                         )
                     )
-            return  # не дальше по диалогам, это только приветствие
+            return
 
-        # 2) Обработка обычных сообщений
+        # Handle user message
         if turn_context.activity.type == ActivityTypes.message:
+            print("🔹 User said:", turn_context.activity.text)  # Debug log
+
             dc = await self.dialogs.create_context(turn_context)
             result = await dc.continue_dialog()
+
             if result.status == DialogTurnStatus.Empty:
                 await dc.begin_dialog("regDialog")
 
-        # 3) (опционально) очистка очереди отправки
+        # Optionally flush
         await turn_context.send_activities([])
 
-    # Шаги WaterfallDialog
-
+    # Dialog steps
     async def ask_name(self, step: WaterfallStepContext):
         return await step.prompt(
             "namePrompt",
@@ -91,9 +93,9 @@ class VoiceBot:
         )
 
     async def save_user(self, step: WaterfallStepContext):
-        name    = step.values["name"]
-        email   = step.values["email"]
-        phone   = step.values["phone"]
+        name = step.values["name"]
+        email = step.values["email"]
+        phone = step.values["phone"]
         address = step.result
 
         cursor = self.db.cursor()
