@@ -13,14 +13,17 @@ from botbuilder.dialogs.prompts import PromptOptions
 
 class VoiceBot:
     def __init__(self):
-        # Connect to Azure SQL Database
+        # Connect to Azure SQL Database with error handling
         conn_str = os.environ.get("SQL_CONNECTION_STRING")
-        self.db = pyodbc.connect(conn_str)
+        try:
+            self.db = pyodbc.connect(conn_str)
+            print("✅ Connected to database.")
+        except Exception as e:
+            print("❌ Database connection failed:", e)
+            self.db = None
 
-        # Temporary in-memory state (replace with real ConversationState in production)
+        # Dialog state and dialogs setup
         self.dialog_state = {}
-
-        # Setup dialogs
         self.dialogs = DialogSet(self.dialog_state)
         self.dialogs.add(TextPrompt("namePrompt"))
         self.dialogs.add(TextPrompt("emailPrompt"))
@@ -40,9 +43,11 @@ class VoiceBot:
         )
 
     async def on_turn(self, turn_context: TurnContext):
-        # Welcome new users
+        print(f"🔹 Activity type: {turn_context.activity.type}")
+
         if turn_context.activity.type == ActivityTypes.conversation_update:
             for member in turn_context.activity.members_added:
+                print("🔸 New member:", member.id)
                 if member.id != turn_context.activity.recipient.id:
                     await turn_context.send_activity(
                         MessageFactory.text(
@@ -51,20 +56,15 @@ class VoiceBot:
                     )
             return
 
-        # Handle user message
         if turn_context.activity.type == ActivityTypes.message:
-            print("🔹 User said:", turn_context.activity.text)  # Debug log
-
+            print("🔹 User said:", turn_context.activity.text)
             dc = await self.dialogs.create_context(turn_context)
             result = await dc.continue_dialog()
-
             if result.status == DialogTurnStatus.Empty:
                 await dc.begin_dialog("regDialog")
 
-        # Optionally flush
         await turn_context.send_activities([])
 
-    # Dialog steps
     async def ask_name(self, step: WaterfallStepContext):
         return await step.prompt(
             "namePrompt",
@@ -93,17 +93,22 @@ class VoiceBot:
         )
 
     async def save_user(self, step: WaterfallStepContext):
-        name = step.values["name"]
-        email = step.values["email"]
-        phone = step.values["phone"]
+        name    = step.values["name"]
+        email   = step.values["email"]
+        phone   = step.values["phone"]
         address = step.result
 
-        cursor = self.db.cursor()
-        cursor.execute(
-            "INSERT INTO Users (name, email, phone, address) VALUES (?, ?, ?, ?)",
-            name, email, phone, address
-        )
-        self.db.commit()
+        if self.db:
+            try:
+                cursor = self.db.cursor()
+                cursor.execute(
+                    "INSERT INTO Users (name, email, phone, address) VALUES (?, ?, ?, ?)",
+                    name, email, phone, address
+                )
+                self.db.commit()
+                print("✅ User saved to database.")
+            except Exception as e:
+                print("❌ Error saving user to DB:", e)
 
         await step.context.send_activity(
             MessageFactory.text(f"Thank you, {name}! You’re all set. 🎉")
