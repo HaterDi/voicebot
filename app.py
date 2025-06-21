@@ -14,7 +14,7 @@ if not APP_ID:
 APP_PASSWORD = os.environ.get("MICROSOFT_APP_PASSWORD")
 if not APP_PASSWORD:
     raise Exception("❌ Environment variable MICROSOFT_APP_PASSWORD not found")
-APP_PASSWORD = os.environ["MICROSOFT_APP_PASSWORD"]
+
 PORT = int(os.environ.get("PORT", 3978))
 
 # -----------------------------------------------------------------------------
@@ -39,7 +39,6 @@ async def messages(req: web.Request) -> web.Response:
         await adapter.process_activity(activity, auth_header, bot.on_turn)
         return web.Response(status=200)
     except Exception as e:
-        # Log the error and return 500
         print("❌ Error handling activity:", e)
         return web.Response(status=500, text=str(e))
 
@@ -50,5 +49,5 @@ app = web.Application()
 app.router.add_post("/api/messages", messages)
 
 if __name__ == "__main__":
-    print(f"Starting server on port {PORT}...")
+    print(f"✅ Starting bot on port {PORT}...")
     web.run_app(app, host="0.0.0.0", port=PORT)
