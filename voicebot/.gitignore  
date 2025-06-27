@@ -1,0 +1,11 @@
+# виртуальное окружение
+venv/
+.venv/
+
+# компиляты Python
+__pycache__/
+*.pyc
+
+# логи, IDE-файлы
+*.log
+.vscode/
