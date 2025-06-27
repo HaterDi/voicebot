@@ -13,7 +13,6 @@ from botbuilder.dialogs.prompts import PromptOptions
 
 class VoiceBot:
     def __init__(self):
-        # Connect to Azure SQL Database with error handling
         conn_str = os.environ.get("SQL_CONNECTION_STRING")
         try:
             self.db = pyodbc.connect(conn_str)
@@ -22,7 +21,6 @@ class VoiceBot:
             print("❌ Database connection failed:", e)
             self.db = None
 
-        # Dialog state and dialogs setup
         self.dialog_state = {}
         self.dialogs = DialogSet(self.dialog_state)
         self.dialogs.add(TextPrompt("namePrompt"))
@@ -63,8 +61,6 @@ class VoiceBot:
             if result.status == DialogTurnStatus.Empty:
                 await dc.begin_dialog("regDialog")
 
-        await turn_context.send_activities([])
-
     async def ask_name(self, step: WaterfallStepContext):
         return await step.prompt(
             "namePrompt",
@@ -93,9 +89,9 @@ class VoiceBot:
         )
 
     async def save_user(self, step: WaterfallStepContext):
-        name    = step.values["name"]
-        email   = step.values["email"]
-        phone   = step.values["phone"]
+        name = step.values["name"]
+        email = step.values["email"]
+        phone = step.values["phone"]
         address = step.result
 
         if self.db:
