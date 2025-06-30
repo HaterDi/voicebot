@@ -1,47 +1,81 @@
-# voicebot/services/db.py
-import os, logging, textwrap
+# services/db.py
+import sqlite3
+from pathlib import Path
 
-# ⬇️  пробуем импортировать pyodbc, но не падаем, если его нет
-try:
-    import pyodbc
-except ImportError:
-    pyodbc = None
+# ──────────────────────────────
+# 1) Файл базы – рядом с этим .py
+# ──────────────────────────────
+DB_PATH = Path(__file__).with_suffix(".sqlite3")
 
-SQL_CONNECTION = os.getenv("SQL_CONNECTION", "")
+# ──────────────────────────────
+# 2) Подключение
+# ──────────────────────────────
+def _conn() -> sqlite3.Connection:
+    return sqlite3.connect(DB_PATH)
 
-_INIT_SQL = textwrap.dedent("""
-IF OBJECT_ID('dbo.users') IS NULL
-CREATE TABLE users(
-  id INT IDENTITY PRIMARY KEY,
-  first NVARCHAR(50), last NVARCHAR(50),
-  phone NVARCHAR(30), email NVARCHAR(100),
-  country NVARCHAR(50), city NVARCHAR(50), zip NVARCHAR(20),
-  created_at DATETIME DEFAULT GETDATE()
-)
-""")
-
-def _get_conn():
-    if not pyodbc or not SQL_CONNECTION:
-        return None
-    return pyodbc.connect(SQL_CONNECTION)
-
-def save_user(data: dict):
-    """
-    Пишет ответы в таблицу users. Если pyodbc или строка подключения
-    отсутствуют, просто выводит предупреждение и продолжает работу.
-    """
-    conn = _get_conn()
-    if conn is None:
-        logging.warning("⚠️  SQL disabled – nothing saved (pyodbc or SQL_CONNECTION missing)")
-        return
-
-    with conn:
-        conn.execute(_INIT_SQL)
-        conn.execute(
-            "INSERT INTO users(first,last,phone,email,country,city,zip) "
-            "VALUES (?,?,?,?,?,?,?)",
-            data["first"], data["last"], data["phone"], data["email"],
-            data["country"], data["city"], data["zip"]
+# ──────────────────────────────
+# 3) Инициализация (создаём таблицу один раз)
+# ──────────────────────────────
+def _init():
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                first_name  TEXT,
+                last_name   TEXT,
+                phone       TEXT,
+                email       TEXT,
+                country     TEXT,
+                city        TEXT,
+                zip         TEXT
+            )
+            """
         )
-        conn.commit()
-        logging.info("✅ User saved to SQL")
+
+_init()  # вызываем при импорте
+
+
+# ──────────────────────────────
+# 4) Сохранение одной анкеты
+# ──────────────────────────────
+_FIELD_ORDER = (
+    "first_name",
+    "last_name",
+    "phone",
+    "email",
+    "country",
+    "city",
+    "zip",
+)
+
+
+def save_user(values: dict):
+    """
+    values – это step.values из бота.
+    Сохраняем ТОЛЬКО нужные поля, игнорируя 'index', 'key' и прочие.
+    """
+    row = [values.get(k) for k in _FIELD_ORDER]  # порядок как в БД
+    with _conn() as con:
+        con.execute(
+            f"""
+            INSERT INTO users ({','.join(_FIELD_ORDER)})
+            VALUES ({','.join('?' * len(_FIELD_ORDER))})
+            """,
+            row,
+        )
+
+
+# ──────────────────────────────
+# 5) Чтение всех пользователей
+# ──────────────────────────────
+def get_all_users():
+    """
+    Возвращает список кортежей:
+    [(first_name, last_name, phone, email, country, city, zip), ...]
+    """
+    with _conn() as con:
+        cur = con.execute(
+            f"SELECT {','.join(_FIELD_ORDER)} FROM users ORDER BY id"
+        )
+        return cur.fetchall()

@@ -1,72 +1,92 @@
+# dialogs/registration_dialog.py
 from botbuilder.dialogs import (
+    ComponentDialog,
     WaterfallDialog,
     WaterfallStepContext,
-    DialogTurnResult,
-    PromptOptions,
     TextPrompt,
+    PromptOptions,
 )
 from botbuilder.core import MessageFactory
 from services.db import save_user
+from services.speech_handler import speak
 
 
-class RegistrationDialog(WaterfallDialog):
-    """8-шаговый waterfall-диалог регистрации."""
-
-    def __init__(self) -> None:
+class RegistrationDialog(ComponentDialog):
+    def __init__(self):
         super().__init__("register")
 
-        # регистрируем шаги
-        self.add_step(self.ask_first)
-        self.add_step(self.ask_last)
-        self.add_step(self.ask_phone)
-        self.add_step(self.ask_email)
-        self.add_step(self.ask_country)
-        self.add_step(self.ask_city)
-        self.add_step(self.ask_zip)
-        self.add_step(self.finish)
+        # порядок вопросов
+        self.fields = [
+            ("first_name", "What is your first name?"),
+            ("last_name", "What is your last name?"),
+            ("phone", "What is your phone number?"),
+            ("email", "What is your email address?"),
+            ("country", "Which country do you live in?"),
+            ("city", "Which city?"),
+            ("zip", "What is your ZIP code?"),
+        ]
 
-    # ───────── helpers ─────────
-    @staticmethod
-    def _prompt(text: str) -> PromptOptions:
-        """Упрощает вызов step.prompt: возвращает PromptOptions."""
-        return PromptOptions(prompt=MessageFactory.text(text))
+        # единственный текстовый prompt
+        self.add_dialog(TextPrompt("text"))
 
-    # ───────── waterfall-шаги ─────────
-    async def ask_first(self, step: WaterfallStepContext) -> DialogTurnResult:
-        return await step.prompt("text", self._prompt("Hi! 👋 What’s your **first name**?"))
+        # динамически строим шаги: ask / confirm / process за поле
+        steps = []
+        for idx, (key, question) in enumerate(self.fields):
+            steps.append(self._make_ask(idx, key, question))
+            steps.append(self._make_confirm(idx, key))
+            steps.append(self._make_process_confirm(idx, key))
+        steps.append(self._finish)
 
-    async def ask_last(self, step):
-        step.values["first"] = step.result.strip()
-        return await step.prompt("text", self._prompt("Great, and your **last name**?"))
+        self.add_dialog(WaterfallDialog("flow", steps))
+        self.initial_dialog_id = "flow"
 
-    async def ask_phone(self, step):
-        step.values["last"] = step.result.strip()
-        return await step.prompt("text", self._prompt("📱 Could I have your phone number?"))
+    # ---------- фабрики шагов ----------
+    def _make_ask(self, idx, key, question):
+        async def step(step_ctx: WaterfallStepContext):
+            # сохраняем индекс текущего вопроса
+            step_ctx.values["idx"] = idx
+            step_ctx.values["key"] = key
+            speak(question)
+            return await step_ctx.prompt(
+                "text",
+                PromptOptions(prompt=MessageFactory.text(question)),
+            )
+        return step
 
-    async def ask_email(self, step):
-        step.values["phone"] = step.result.strip()
-        return await step.prompt("text", self._prompt("✉️ Your e-mail address?"))
+    def _make_confirm(self, idx, key):
+        async def step(step_ctx: WaterfallStepContext):
+            # сохранили введённое значение временно
+            step_ctx.values["candidate"] = step_ctx.result.strip()
+            confirm_q = f'You said: "{step_ctx.values["candidate"]}". Is that correct? (yes / no)'
+            speak(confirm_q)
+            return await step_ctx.prompt(
+                "text",
+                PromptOptions(prompt=MessageFactory.text(confirm_q)),
+            )
+        return step
 
-    async def ask_country(self, step):
-        step.values["email"] = step.result.strip()
-        return await step.prompt("text", self._prompt("🌍 Country of residence?"))
+    def _make_process_confirm(self, idx, key):
+        async def step(step_ctx: WaterfallStepContext):
+            answer = step_ctx.result.strip().lower()
+            if answer != "yes":
+                # повторяем тот же вопрос
+                return await step_ctx.replace_dialog("register", {"restart_from": idx})
 
-    async def ask_city(self, step):
-        step.values["country"] = step.result.strip()
-        return await step.prompt("text", self._prompt("🏙️ City?"))
+            # подтверждено ‒ сохраняем
+            step_ctx.values[key] = step_ctx.values["candidate"]
 
-    async def ask_zip(self, step):
-        step.values["city"] = step.result.strip()
-        return await step.prompt("text", self._prompt("ZIP / postal code?"))
+            # если ещё есть поля ‒ двигаемся к следующему
+            if idx + 1 < len(self.fields):
+                return await step_ctx.next(None)  # перейдём к ask следующего поля
 
-    async def finish(self, step):
-        step.values["zip"] = step.result.strip()
+            # иначе ‒ к финишу
+            return await step_ctx.next("done")
+        return step
 
-        # сохраняем ответы (если настроен SQL)
-        save_user(step.values)
-
-        await step.context.send_activity(
-            f"Thanks **{step.values['first']}** – you’re all set! ✅"
-        )
-        return await step.end_dialog()
-
+    # ---------- финальный шаг ----------
+    async def _finish(self, step_ctx: WaterfallStepContext):
+        # данный шаг вызывается один раз, когда получим "done"
+        save_user(step_ctx.values)
+        speak("Thank you for registering!")
+        await step_ctx.context.send_activity("✅ Thank you for registering!")
+        return await step_ctx.end_dialog()

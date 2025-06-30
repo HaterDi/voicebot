@@ -23,4 +23,5 @@ app.router.add_post("/api/messages", messages)
 
 if __name__ == "__main__":
     print(f"Starting server on port {PORT}…")
-    web.run_app(app, host="0.0.0.0", port=PORT)
+    web.run_app(app, port=8000)
+

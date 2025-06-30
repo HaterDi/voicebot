@@ -1,112 +1,55 @@
-import os
-import pyodbc
-from botbuilder.core import TurnContext, MessageFactory
-from botbuilder.schema import ActivityTypes
-from botbuilder.dialogs import (
-    DialogSet,
-    DialogTurnStatus,
-    WaterfallDialog,
-    WaterfallStepContext,
-    TextPrompt
+# bots/voice_bot.py
+
+import asyncio
+from botbuilder.core import (
+    ActivityHandler, TurnContext,
+    ConversationState, MemoryStorage
 )
-from botbuilder.dialogs.prompts import PromptOptions
+from botbuilder.dialogs import (
+    DialogSet, DialogTurnStatus, TextPrompt
+)
+from dialogs.registration_dialog import RegistrationDialog
+from services.db import get_all_users
+from services.speech_handler import listen, speak
 
-class VoiceBot:
+_memory = MemoryStorage()
+_conversation = ConversationState(_memory)
+
+class VoiceBot(ActivityHandler):
     def __init__(self):
-        conn_str = os.environ.get("SQL_CONNECTION_STRING")
-        try:
-            self.db = pyodbc.connect(conn_str)
-            print("✅ Connected to database.")
-        except Exception as e:
-            print("❌ Database connection failed:", e)
-            self.db = None
-
-        self.dialog_state = {}
+        self.dialog_state = _conversation.create_property("DialogState")
         self.dialogs = DialogSet(self.dialog_state)
-        self.dialogs.add(TextPrompt("namePrompt"))
-        self.dialogs.add(TextPrompt("emailPrompt"))
-        self.dialogs.add(TextPrompt("phonePrompt"))
-        self.dialogs.add(TextPrompt("addressPrompt"))
-        self.dialogs.add(
-            WaterfallDialog(
-                "regDialog",
-                [
-                    self.ask_name,
-                    self.ask_email,
-                    self.ask_phone,
-                    self.ask_address,
-                    self.save_user,
-                ],
-            )
-        )
+        self.dialogs.add(TextPrompt("text"))
+        self.dialogs.add(RegistrationDialog())
 
-    async def on_turn(self, turn_context: TurnContext):
-        print(f"🔹 Activity type: {turn_context.activity.type}")
+    async def on_members_added_activity(self, members_added, turn: TurnContext):
+        for member in members_added:
+            if member.id != turn.activity.recipient.id:
+                speak("Hello! I'm your registration bot. Let's get started!")
+                await turn.send_activity("Hello! 👋 I'm your registration bot — let’s get started!")
 
-        if turn_context.activity.type == ActivityTypes.conversation_update:
-            for member in turn_context.activity.members_added:
-                print("🔸 New member:", member.id)
-                if member.id != turn_context.activity.recipient.id:
-                    await turn_context.send_activity(
-                        MessageFactory.text(
-                            "Hello! 👋\nI’m your voice registration bot.\nMay I know your name?"
-                        )
-                    )
+    async def on_members_added_activity(self, members_added, turn: TurnContext):
+        for member in members_added:
+            if member.id != turn.activity.recipient.id:
+                speak("Hello! I'm your registration bot. Let's get started!")
+                await turn.send_activity("Hello! 👋 I'm your registration bot — let’s get started!")
+
+    async def on_message_activity(self, turn: TurnContext):
+        dialog_context = await self.dialogs.create_context(turn)
+        result = await dialog_context.continue_dialog()
+
+        if result.status == DialogTurnStatus.Empty:
+            # Стартуем регистрацию, если она ещё не начата
+            speak("Let's start your registration. What’s your first name?")
+            await dialog_context.begin_dialog("register")
+            await _conversation.save_changes(turn)
             return
+        # Диалоговая логика
+        dialog_context = await self.dialogs.create_context(turn)
+        result = await dialog_context.continue_dialog()
 
-        if turn_context.activity.type == ActivityTypes.message:
-            print("🔹 User said:", turn_context.activity.text)
-            dc = await self.dialogs.create_context(turn_context)
-            result = await dc.continue_dialog()
-            if result.status == DialogTurnStatus.Empty:
-                await dc.begin_dialog("regDialog")
+        if result.status == DialogTurnStatus.Empty:
+            speak("Let's start your registration. What’s your first name?")
+            await dialog_context.begin_dialog("register")
 
-    async def ask_name(self, step: WaterfallStepContext):
-        return await step.prompt(
-            "namePrompt",
-            PromptOptions(prompt=MessageFactory.text("What’s your name?"))
-        )
-
-    async def ask_email(self, step: WaterfallStepContext):
-        step.values["name"] = step.result
-        return await step.prompt(
-            "emailPrompt",
-            PromptOptions(prompt=MessageFactory.text("Thanks! What’s your email?"))
-        )
-
-    async def ask_phone(self, step: WaterfallStepContext):
-        step.values["email"] = step.result
-        return await step.prompt(
-            "phonePrompt",
-            PromptOptions(prompt=MessageFactory.text("Great. And your phone number?"))
-        )
-
-    async def ask_address(self, step: WaterfallStepContext):
-        step.values["phone"] = step.result
-        return await step.prompt(
-            "addressPrompt",
-            PromptOptions(prompt=MessageFactory.text("Finally, what’s your address?"))
-        )
-
-    async def save_user(self, step: WaterfallStepContext):
-        name = step.values["name"]
-        email = step.values["email"]
-        phone = step.values["phone"]
-        address = step.result
-
-        if self.db:
-            try:
-                cursor = self.db.cursor()
-                cursor.execute(
-                    "INSERT INTO Users (name, email, phone, address) VALUES (?, ?, ?, ?)",
-                    name, email, phone, address
-                )
-                self.db.commit()
-                print("✅ User saved to database.")
-            except Exception as e:
-                print("❌ Error saving user to DB:", e)
-
-        await step.context.send_activity(
-            MessageFactory.text(f"Thank you, {name}! You’re all set. 🎉")
-        )
-        return await step.end_dialog()
+        await _conversation.save_changes(turn)
